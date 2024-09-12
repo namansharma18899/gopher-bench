@@ -10,11 +10,20 @@ import (
 	"time"
 
 	"github.com/olekukonko/tablewriter"
+	"github.com/sirupsen/logrus"
 )
+
+var log = logrus.New()
 
 type Config struct {
 	URL        string `json:"url"`
 	Iterations int    `json:"iterations"`
+}
+
+func init() {
+	log.Formatter = new(logrus.JSONFormatter)
+	log.Out = os.Stdout
+	log.Level = logrus.InfoLevel
 }
 
 func loadConfig() (*Config, error) {
@@ -32,12 +41,18 @@ func loadConfig() (*Config, error) {
 	return config, nil
 }
 
-func benchApp(config Config, ch chan [2]float64) {
+func benchApp(config Config, ch chan [2]float64, theadNum int) {
 	start := time.Now()
 	resp, err := http.Get(config.URL)
 	if err != nil {
+		log.WithFields(logrus.Fields{
+			"threadNum": theadNum,
+		}).Error("Error while hitting the Endpoint ", config.URL)
 		fmt.Println("Error:", err)
 	}
+	log.WithFields(logrus.Fields{
+		"threadNum": theadNum,
+	}).Info("GET Request Successful ", config.URL)
 	defer resp.Body.Close()
 	elapsed := time.Since(start)
 	latency := float64(elapsed.Milliseconds())
@@ -58,14 +73,13 @@ func main() {
 	}
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetHeader([]string{"URL", "Latency", "Throughput(Mbps)"})
-
 	threads := 10
 	ch := make(chan [2]float64, threads)
 	var wg sync.WaitGroup
 	for i := 1; i <= threads; i++ {
 		wg.Add(1)
 		go func(config Config, ch chan [2]float64) {
-			benchApp(config, ch)
+			benchApp(config, ch, i)
 			defer wg.Done()
 		}(*config, ch)
 	}
@@ -75,7 +89,6 @@ func main() {
 	}()
 
 	for data := range ch {
-		fmt.Printf("Main thread received data: %d\n", data)
 		table.Append([]string{
 			config.URL,
 			fmt.Sprintf("%.2f ms", data[0]),
